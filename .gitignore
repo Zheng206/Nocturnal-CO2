@@ -1,0 +1,13 @@
+.DS_Store
+.Rhistory
+.Rproj.user/
+ICC/
+Nocturnal_CO2.Rproj
+R01/
+R01_Feb/
+data/
+meeting notes/
+slides/
+*.Rproj
+code/rmd/old
+*.html

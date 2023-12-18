@@ -1,0 +1,90 @@
+---
+title: "Overnight CO2"
+format: 
+  html:
+    self-contained: true
+    title-block-banner: true
+    title-block-banner-color: "#7FFFD4"
+    number-sections: true
+    page-layout: full
+    toc: true
+    toc-title: Contents
+    toc-location: left
+    code-fold: true
+    code-overflow: wrap
+    code-tools: true
+    theme: minty
+    cap-location: bottom
+    
+editor: visual
+author: "Zheng Ren"
+date: "`r Sys.Date()`"
+execute:
+  error: false
+  warning: false
+  message: false
+  results: asis
+  freeze: auto
+---
+
+```{r setup}
+#| include: false
+#knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = "/Users/zhengren/Desktop/Nocturnal_CO2")
+options(scipen=999)
+setwd("/Users/zhengren/Desktop/Nocturnal_CO2")
+library(dplyr)
+library(stringr)
+library(tidyverse)
+library(glue)
+library(readxl)
+library(ggplot2)
+library(rlang)
+library(DT)
+library(broom)
+library(ggfortify)
+library(kableExtra)
+library(corrplot)
+library(car)
+library(openxlsx)
+library(lme4)
+library(broom.mixed)
+
+input = read_csv("./data/data_management/missing/missing_summary_20231129.csv")
+total_df = read_csv("./data/data_management/total_df/overnight_data_all_subjects_20231129.csv")
+
+```
+
+# Missing Data Summary
+
+```{r}
+prob_df = input %>% filter(PCO2_status == "Yes") %>% dplyr::select(subject, visit, day, PCO2_miss_n) %>%  arrange(desc(PCO2_miss_n)) %>% mutate(day = as.character(day))
+
+kbl(prob_df, escape = F, align = "c") %>% kable_styling(bootstrap_options = "striped") %>%
+  kable_classic(html_font = "Cambria")
+
+```
+
+# PCO2 Distribution
+
+```{r}
+prob_df = input %>% filter(PCO2_status == "Yes") %>% dplyr::select(subject, visit, day, PCO2_miss_n) %>%  arrange(desc(PCO2_miss_n)) %>% mutate(day = as.character(day))
+```
+
+::: panel-tabset
+```{r}
+#| echo: true
+#| results: asis
+#| fig-width: 20
+#| fig-height: 10
+
+for (i in 1:nrow(prob_df)){
+  cat('## ', prob_df[[i, "subject"]], prob_df[[i, "day"]], '\n')
+  print(ggplot(total_df %>% filter(subject == prob_df[[i, "subject"]], day == prob_df[[i, "day"]]), aes(x = as.numeric(time), y = PCO2_DC)) +
+    geom_line() +
+    labs(x = "Time (seconds)", y = "PCO2"))
+  cat('\n\n')
+}
+
+```
+:::

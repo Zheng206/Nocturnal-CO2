@@ -1,0 +1,427 @@
+---
+title: "Overnight CO2"
+format: 
+  html:
+    self-contained: true
+    title-block-banner: true
+    #title-block-banner-color: "#7FFFD4"
+    number-sections: true
+    page-layout: full
+    toc: true
+    toc-title: Contents
+    toc-location: left
+    code-fold: true
+    code-overflow: wrap
+    code-tools: true
+    theme: flatly
+    cap-location: bottom
+    
+editor: visual
+author: "Zheng Ren"
+date: "`r Sys.Date()`"
+execute:
+  error: false
+  warning: false
+  message: false
+  results: asis
+  freeze: auto
+---
+
+```{r setup}
+#| include: false
+#knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = "/Users/zhengren/Desktop/Nocturnal_CO2")
+options(scipen=999)
+setwd("/Users/zhengren/Desktop/Nocturnal_CO2")
+library(dplyr)
+library(stringr)
+library(tidyverse)
+library(glue)
+library(readxl)
+library(ggplot2)
+library(rlang)
+library(DT)
+library(broom)
+library(ggfortify)
+library(kableExtra)
+library(corrplot)
+library(car)
+library(openxlsx)
+library(lme4)
+library(broom.mixed)
+library(glmmLasso)
+source("./code/R/co2_function.R")
+pco2_feature_df = read_csv("./data/aim1/predictors_1206.csv")
+
+total_df = read_csv("./code/co2_app/data/data_stream/total_df.csv")
+subject_summary = read_csv("./code/co2_app/data/wavelet/subject_summary.csv")
+features_df = read_csv("./code/co2_app/data/wavelet/features_df.csv")
+
+```
+
+# Aim 1
+
+We aim to identify potential PCO2-related features that enhance the performance of the prediction model. These features should also exhibit low correlation with the predictors currently included in the model.
+
+## Method
+
+**Step 1: Feature Extraction**
+
+-   Extract 18 PCO2-related features from nocturnal data streams as potential predictors.
+
+**Step 2: Principal Component Analysis (PCA)**
+
+-   Perform PCA on these 18 PCO2 features to reduce feature dimensionality and address multicollinearity issues.
+
+**Step 3: Mix Effect Model**
+
+-   Full model (PCs as predictors)
+
+$$fvc \sim PC1 + PC2 + PC3 + PC4 + PC5 + (1 | subject)$$
+
+-   Univariate model (PCs, raw features, predictors in the prediction model) $$fvc \sim predictor_1 + (1 | subject)$$
+
+
+**Step 4: Correlation Test**
+
+-   We employed a correlation matrix to illustrate the relationships among each pair of predictors.
+
+## Data
+
+In this analysis, we utilized a dataset comprising **14 patients** and **34 visits**, aggregating night-level statistics to the visit-level. Among four types of outcomes: 1) FVC < 50, 2) NIV initiation, 3) Tracheostomy, 4) Death, only FVC < 50 exhibits variance. To achieve more power, we used continuous fvc as the outcome in our analysis.
+
+```{r}
+#| label: fig-charts0
+#| fig-cap: "Sample Size Summary"
+
+demo_df = pco2_feature_df %>% group_by(subject) %>% summarize(count = n()) %>% ungroup()
+
+ggplot(demo_df, aes(x = subject, y = count)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Subjects", y = "Number of Visits") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+## Result
+
+### PCO2 Related Features Extraction
+
+After inspecting nocturnal PCO2 data streams, we identified 18 PCO2-related features as potential predictors.
+
+```{r}
+pco2_feature_name = colnames(pco2_feature_df)[c(3:16, 20:23)]
+
+print(pco2_feature_name)
+```
+
+### PCA
+
+::: {.panel-tabset}
+
+#### Variance Plot
+
+Based on the variance plot, we can see that the first 5 PCs explain most of the variance (95%). As a result, we included the first 5 PCs in our mixed effect model.
+
+```{r}
+#| output: false
+#| label: fig-charts1
+#| fig-cap: "PCA Variance Explained"
+#| fig-subcap: 
+#|  - "Variance Explained"
+#|  - "Cumulative Variance Explained"
+#| layout-ncol: 2
+
+pca_comp = prcomp(pco2_feature_df[pco2_feature_name], scale. = TRUE)
+variance_explained = pca_comp$sdev^2 / sum(pca_comp$sdev^2)
+
+pca_df = data.frame(Principal_Component = seq_along(variance_explained), Variance_Explained = variance_explained, Variance_Explained_Cum = cumsum(variance_explained))
+
+ggplot(pca_df, aes(x = Principal_Component, y = Variance_Explained)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Principal Component", y = "Variance Explained")
+
+ggplot(pca_df, aes(x = Principal_Component, y = Variance_Explained_Cum)) +
+  geom_line() +
+  geom_point() +
+  geom_vline(xintercept = 5, color = "red", linetype = "dashed") +
+  labs(x = "Principal Component", y = "Cumulative Variance Explained")
+
+## chose 6 PCs
+pc_df = data.frame(pca_comp$x)[c(1:5)]
+pca_df = cbind(pco2_feature_df[c(1:2, 17:19, 24:27)], pc_df)
+
+```
+
+#### Biplot
+
+We employed the biplot to enhance our understanding of the first two principal components (PCs). PC1 appears to capture the mean trend of PCO2 levels, while PC2 seems to represent the variance and range of PCO2 data.
+```{r}
+#| label: fig-charts2
+#| fig-cap: "Biplot"
+#| fig-height: 8
+#| fig-width: 12
+
+
+biplot(pca_comp, cex = 0.45, expand = 1.3, xlab = "PC1 (59%)", ylab = "PC2 (15%)")
+
+#biplot(pca_comp, cex = 0.45, expand = 0.9, choices = 3:4, xlab = "PC3 (8%)", ylab = "PC4 (6%)")
+#arrows(0, 0, pca_comp$rotation[, 3], pca_comp$rotation[, 4], angle = 15, length = 0.1, col = "blue")
+
+```
+:::
+
+### Mixed Effect Model
+
+::: {.panel-tabset}
+
+#### Full Model with 6 Principal Components
+
+No significant association is identified.
+
+```{r}
+model = lmerTest::lmer(fvc ~ PC1 + PC2 + PC3 + PC4 + PC5 + (1 | subject), data = pca_df)
+pco2_table = model %>% tidy() %>% filter(effect == "fixed", term != "(Intercept)") %>% dplyr::select(term, estimate, std.error, statistic, df, p.value) %>% mutate(p.value = sprintf("%.3f", p.value),
+       estimate = sprintf("%.3f", estimate),
+       std.error = sprintf("%.3f", std.error),
+       statistic = sprintf("%.3f", statistic),
+       df = sprintf("%.3f", df))
+kable(pco2_table, align = "c") %>% kable_styling(bootstrap_options = "striped") %>% row_spec(which(as.numeric(pco2_table$p.value) <= 0.05), bold = F, color = "black", background = "lightyellow") %>%
+  kable_classic(html_font = "Cambria")
+
+```
+
+#### Univariate Model
+
+The **range of PCO2** is found significantly associated with fvc levels. 
+
+**Principal Components**
+
+```{r}
+univariate_result = lapply(pco2_feature_name, function(x){
+  form = paste0("fvc ~ ", x, " + (1 | subject)")
+  mix_model = lmerTest::lmer(as.formula(form), data = pco2_feature_df)
+  uni_table = mix_model %>% tidy() %>% filter(effect == "fixed", term != "(Intercept)") %>% dplyr::select(term, estimate, std.error, statistic, df, p.value) %>% mutate(p.value = sprintf("%.3f", p.value),
+       estimate = sprintf("%.3f", estimate),
+       std.error = sprintf("%.3f", std.error),
+       statistic = sprintf("%.3f", statistic),
+       df = sprintf("%.3f", df))
+  return(uni_table)
+}) %>% bind_rows()
+
+univariate_pca_result = lapply(colnames(pca_df)[c(4:8, 10:14)], function(x){
+  form = paste0("fvc ~ ", x, " + (1 | subject)")
+  mix_model = lmerTest::lmer(as.formula(form), data = pca_df)
+  uni_table = mix_model %>% tidy() %>% filter(effect == "fixed", term != "(Intercept)") %>% dplyr::select(term, estimate, std.error, statistic, df, p.value) %>% mutate(p.value = sprintf("%.3f", p.value),
+       estimate = sprintf("%.3f", estimate),
+       std.error = sprintf("%.3f", std.error),
+       statistic = sprintf("%.3f", statistic),
+       df = sprintf("%.3f", df))
+  return(uni_table)
+}) %>% bind_rows()
+```
+
+```{r}
+pc_table = univariate_pca_result %>% filter(grepl("PC", term))
+kable(pc_table, align = "c") %>% kable_styling(bootstrap_options = "striped") %>% row_spec(which(as.numeric(pc_table$p.value) <= 0.05), bold = F, color = "black", background = "lightyellow") %>%
+  kable_classic(html_font = "Cambria")
+```
+
+**PCO2-related Features**
+
+```{r}
+kable(univariate_result, align = "c") %>% kable_styling(bootstrap_options = "striped") %>% row_spec(which(as.numeric(univariate_result$p.value) <= 0.05), bold = F, color = "black", background = "lightyellow") %>%
+  kable_classic(html_font = "Cambria")
+```
+
+**Predictors in the Prediction Model**
+
+```{r}
+predictor_table = univariate_pca_result %>% filter(!grepl("PC", term))
+kable(predictor_table, align = "c") %>% kable_styling(bootstrap_options = "striped") %>% row_spec(which(as.numeric(predictor_table$p.value) <= 0.05), bold = F, color = "black", background = "lightyellow") %>%
+  kable_classic(html_font = "Cambria")
+```
+:::
+
+### Correlation Test
+
+The principal components and the range of PCO2 exhibit a small correlation with the predictors currently used in the prediction model. Additionally, we found the range of PCO2 is negatively correlated with PC2, which supports the previous argument that PC2 captures the rage of PCO2 data.
+
+```{r}
+#| label: fig-charts3
+#| fig-cap: "Correlation Matrix"
+#| fig-width: 8
+#| fig-hight: 10
+
+variable_matrix = as.matrix(cbind(pco2_feature_df[c(17:19, 24:26)], pc_df, pco2_feature_df["PCO2_range"]))
+M = cor(variable_matrix)
+corrplot(M, method = 'number', order = 'alphabet', number.cex = 0.6)
+
+```
+
+# Aim 3
+
+We aim to determine if discrete wavelet transform of nocturnal continuous data streams can indentify PtcCO2 wavelet features associated with standard clinical measurements FVC and MIP.
+
+## Method
+
+**Step 1: Mixed Effect Model**
+
+-   Raw Features
+
+$$\text{standard measurement} \sim \sum_{i}^{k = 7} x_{i} + (1 | subject)$$
+
+-   Wavelet Features (Lasso Regularization)
+
+$$\text{standard measurement} \sim \sum_{i}^{k = 205} x_{i} + \delta |x_{i}| + (1|subject)$$
+**Step 2: Hierarchical Clustering**
+
+-   night level
+
+we employed the complete-linkage method with Euclidean distance to identify distinct clusters at the **night level**.
+
+-   visit level
+
+we applied the majority vote method to summarize the night-level result to the **visit-level**.
+
+-   subject level
+
+we applied the majority vote method to summarize the visit-level result to the **subject-level**.
+
+
+## Result
+
+### Mixed Effect Model
+
+```{r}
+
+wave_features = colnames(features_df)[-c(1:2)]
+wave_features = sapply(wave_features, function(x) gsub(" ", "_", x), USE.NAMES = FALSE)
+colnames(features_df) = c(colnames(features_df)[1:2], wave_features)
+
+# Mixed Model Data
+mix_df = subject_summary %>% left_join(features_df, by = c("subject", "day")) %>% na.omit() %>% group_by(subject, visit) %>% summarise_if(is.numeric, mean, na.rm = TRUE) %>% ungroup() 
+mix_df= mix_df[,apply(mix_df, 2, function(col) { length(unique(col)) > 1 })]
+wave_features = colnames(mix_df)[grepl("_level_", colnames(mix_df))]
+wave_features = wave_features[which(!grepl("*_13$|*_12$|*_11$|*_10$", wave_features))]
+mix_df[wave_features] = scale(mix_df[wave_features], center = TRUE, scale = TRUE)
+mix_df$subject = as.factor(mix_df$subject)
+```
+
+::: {.panel-tabset}
+
+#### Raw Features
+
+It appears that the occurrence of PCO2 reaching above 45 mmHg and 50 mmHg for more than 5 minutes is <span style="color:red;">**negatively**</span> associated with FVC.
+
+```{r}
+# Raw Feature Significance
+PCO2_thre = c(45, 50)
+outcomes = c("fvc", "mip")
+input_df = expand_grid(outcomes, PCO2_thre)
+raw_sig_df = lapply(1:nrow(input_df), function(i){mix_model(input_df[[i, "outcomes"]], input_df[[i, "PCO2_thre"]], mix_df)[[1]]}) %>% bind_rows() %>% filter(p.value < 0.05) %>% mutate(estimate = sprintf("%.3f", as.numeric(estimate)), p.value = sprintf("%.3f", as.numeric(p.value)))
+kable(raw_sig_df, align = "c") %>% kable_styling(bootstrap_options = "striped") %>% row_spec(which(as.numeric(raw_sig_df$p.value) <= 0.05), bold = F, color = "black", background = "lightyellow") %>%
+  kable_classic(html_font = "Cambria") %>%
+  column_spec(2, color = ifelse(as.numeric(raw_sig_df$estimate) < 0, "green", "red"))
+```
+
+#### Wavelet Features
+
+It seems that wavelet features at level 1, 4, 5, 6, 7, 8 have significant association with FVC and MIP.
+
+```{r}
+result_table = lapply(outcomes, function(w){
+  if (w == "fvc"){thre = 165}else{thre = 290}
+  #if (w == "fvc"){thre = 135}else{thre = 290}
+  mix_model(w, thre = 50, mix_df, type = "wavelet", lambda = thre, features = wave_features)[1]
+}) %>% bind_rows() %>% na.omit() 
+
+kable(result_table, align = "c") %>% kable_styling(bootstrap_options = "striped") %>% row_spec(which(!is.na(result_table$sig)), bold = F, color = "black", background = "lightyellow") %>%
+  kable_classic(html_font = "Cambria") %>%
+  column_spec(4, color = ifelse(as.numeric(result_table$estimate) < 0, "green", "red"))
+```
+:::
+
+### Hierarchical Clustering
+
+We found **MIP** levels significantly differ between the **visit-level** clusters and the **subject-level** clusters.
+
+::: {.panel-tabset}
+
+#### Night-level
+
+```{r}
+#| label: fig-charts4
+#| fig-cap: "MIP Distribution Between Clusters (Night-level)"
+
+
+k_means_df = subject_summary %>% left_join(features_df, by = c("subject", "day")) %>% na.omit()
+mat = as.matrix(k_means_df[wave_features]) 
+hclust.out = hclust(dist(mat))
+k_means_df$cluster = cutree(hclust.out, k = 4)
+k_means_df$cluster_night = sapply(k_means_df$cluster, function(x){case_when(x == 1 ~ 1, x == 2 ~ 1, x == 3 ~ 1, x == 4 ~ 0)}, USE.NAMES = FALSE)
+
+ggplot(k_means_df, aes(x = as.factor(cluster_night), y = mip, fill = as.factor(cluster_night))) +
+  geom_boxplot() +
+  geom_jitter() +
+  scale_x_discrete(labels = c("Normal", "Abnormal")) +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Cluster", y = "MIP", fill = "Cluster") +
+  theme(legend.position = "none")
+
+n_test = t.test(k_means_df$mip[which(k_means_df$cluster_night == 1)], k_means_df$mip[which(k_means_df$cluster_night == 0)], alternative = "two.sided")
+```
+
+-   The Welch Two Sample t-test resulted in a p-value of `r sprintf("%.3f", n_test$p.value)`, suggesting that there is no significant difference between the two groups.
+
+#### Visit-level
+```{r}
+#| label: fig-charts5
+#| fig-cap: "MIP Distribution Between Clusters (Visit-level)"
+
+visit_cluster = k_means_df %>% dplyr::select(subject, visit, day, cluster_night) %>% group_by(subject, visit) %>% summarize(cluster_visit = mean(cluster_night)) %>% ungroup()
+visit_cluster$cluster_visit = sapply(visit_cluster$cluster_visit, function(x) case_when(x>=0.5~1,
+                      .default = 0), USE.NAMES = FALSE)
+visit_cluster = visit_cluster %>% left_join(k_means_df %>% dplyr::select(subject, visit, mip, fvc), by = c("subject", "visit")) %>% distinct()
+
+ggplot(visit_cluster, aes(x = as.factor(cluster_visit), y = mip, fill = as.factor(cluster_visit))) +
+  geom_boxplot() +
+  geom_jitter() +
+  scale_x_discrete(labels = c("Normal", "Abnormal")) +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Cluster", y = "MIP", fill = "Cluster") +
+  theme(legend.position = "none")
+
+k_means_df  = k_means_df %>% left_join(visit_cluster %>% dplyr::select(subject, visit, cluster_visit), by = c("subject", "visit"))
+
+v_test = t.test(visit_cluster$mip[which(visit_cluster$cluster_visit == 1)], visit_cluster$mip[which(visit_cluster$cluster_visit == 0)], alternative = "two.sided")
+```
+
+-   The Welch Two Sample t-test resulted in a p-value of <span style="color:red;">`r sprintf("%.3f", v_test$p.value)`</span>, suggesting that there is a significant difference between the two groups.
+
+#### Subject-level
+
+```{r}
+#| label: fig-charts6
+#| fig-cap: "MIP Distribution Between Clusters (Subject-level)"
+
+
+patient_cluster = k_means_df %>% dplyr::select(subject, visit, day, cluster_night) %>% group_by(subject) %>% summarize(cluster_patient = mean(cluster_night)) %>% ungroup()
+patient_cluster$cluster_patient = sapply(patient_cluster$cluster_patient, function(x) case_when(x>=0.5~1,
+                                                                                        .default = 0), USE.NAMES = FALSE)
+patient_cluster =patient_cluster %>% left_join(k_means_df %>% dplyr::select(subject, visit, mip, fvc) %>% group_by(subject) %>% summarize(mip = mean(mip), fvc = mean(fvc)), by = c("subject")) %>% distinct()
+
+ggplot(patient_cluster, aes(x = as.factor(cluster_patient), y = mip, fill = as.factor(cluster_patient))) +
+  geom_boxplot() +
+  geom_jitter() +
+  scale_x_discrete(labels = c("Normal", "Abnormal")) +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Cluster", y = "MIP", fill = "Cluster") +
+  theme(legend.position = "none")
+
+k_means_df  = k_means_df %>% left_join(patient_cluster %>% dplyr::select(subject, cluster_patient), by = c("subject"))
+
+s_test = t.test(patient_cluster$mip[which(patient_cluster$cluster_patient == 1)], patient_cluster$mip[which(patient_cluster$cluster_patient == 0)], alternative = "two.sided")
+```
+
+-   The Welch Two Sample t-test resulted in a p-value of <span style="color:red;">`r sprintf("%.3f", s_test$p.value)`</span>, suggesting that there is a significant difference between the two groups.
+
+:::

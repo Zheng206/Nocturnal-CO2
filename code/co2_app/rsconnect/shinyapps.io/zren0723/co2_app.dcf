@@ -1,0 +1,11 @@
+name: co2_app
+title:
+username:
+account: zren0723
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 9460489
+bundleId: 7763740
+url: https://zren0723.shinyapps.io/co2_app/
+asMultiple: FALSE
+asStatic: FALSE
