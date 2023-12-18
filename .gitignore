@@ -11,3 +11,7 @@ slides/
 *.Rproj
 code/rmd/old
 *.html
+Rplots.pdf
+*.png
+/code/old/
+
